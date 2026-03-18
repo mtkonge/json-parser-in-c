@@ -1,8 +1,8 @@
+#define _POSIX_C_SOURCE 200809L // for using strdup
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <regex.h>  
 
 typedef enum JsonValueType {
     JSON_NULL_t,
@@ -20,13 +20,13 @@ typedef struct JsonValue {
         double number;
         char *string;
         struct HashTable *object;
-        struct JsonArray *array;
+        struct DynamicArray *array;
     } value;
 } JsonValue;
 
 typedef struct HashEntry {
     char *key;
-    JsonValue *value;
+    void *value;
     struct HashEntry *next;
 } HashEntry;
 
@@ -36,10 +36,11 @@ typedef struct HashTable {
     size_t size;
 } HashTable;
 
-typedef struct JsonArray {
-    struct JsonValue *value;
-    struct JsonArray *next;
-} JsonArray;
+typedef struct DynamicArray {
+    void **value;
+    size_t capacity;
+    size_t size;
+} DynamicArray;
 
 typedef enum JsonTokenType {
     JSON_TOKEN_STRING_t,
@@ -61,18 +62,23 @@ typedef struct JsonTokenEntry {
         char char_value;
         char *string_value;
     } value;
-    struct JsonTokenEntry *next;
 } JsonTokenEntry;
 
-void append_token(JsonTokenEntry **head, JsonTokenEntry **tail, JsonTokenEntry *new_token) {
-    if (*head == NULL) {
-        *head = new_token;
-        *tail = new_token;
-    } else {
-        (*tail)->next = new_token;
-        *tail = new_token;
+typedef struct JsonTokenArray {
+    JsonTokenEntry **value;
+    size_t capacity;
+    size_t size;
+} JsonTokenArray;
+
+void append_token(JsonTokenArray *array, JsonTokenEntry *new_token) {
+    if (array->size >= array->capacity) {
+        array->capacity *= 2;
+        array->value = realloc(array->value, sizeof(JsonTokenArray) * array->capacity);
     }
+    array->value[array->size] = new_token;
+    array->size++;
 }
+
 
 JsonTokenEntry *create_token(JsonTokenType type) {
     JsonTokenEntry *token = malloc(sizeof(JsonTokenType));
@@ -82,38 +88,40 @@ JsonTokenEntry *create_token(JsonTokenType type) {
 
 char *json_token_type_to_string(JsonTokenType type) {
     switch (type) {
-    case JSON_TOKEN_STRING_t:
-        return "JSON_TOKEN_STRING_t";
-    case JSON_TOKEN_NUMBER_t:
-        return "JSON_TOKEN_NUMBER_t";
-    case JSON_TOKEN_COMMA_t:
-        return "JSON_TOKEN_COMMA_t";
-    case JSON_TOKEN_COLON_t:
-        return "JSON_TOKEN_COLON_t";
-    case JSON_TOKEN_TRUE_t:
-        return "JSON_TOKEN_TRUE_t";
-    case JSON_TOKEN_FALSE_t:
-        return "JSON_TOKEN_FALSE_t";
-    case JSON_TOKEN_NULL_t:
-        return "JSON_TOKEN_NULL_t";
-    case JSON_TOKEN_BRACE_OPEN_t:
-        return "JSON_TOKEN_BRACE_OPEN_t";
-    case JSON_TOKEN_BRACE_CLOSE_t:
-        return "JSON_TOKEN_BRACE_CLOSE_t";
-    case JSON_TOKEN_BRACKET_CLOSE_t:
-        return "JSON_TOKEN_BRACKET_CLOSE_t";
-    case JSON_TOKEN_BRACKET_OPEN_t:
-        return "JSON_TOKEN_BRACKET_OPEN_t";
-    default:
-        fprintf(stderr, "Unreachable\n");
-        exit(EXIT_FAILURE);
-    }
+        case JSON_TOKEN_STRING_t:
+            return "JSON_TOKEN_STRING_t";
+        case JSON_TOKEN_NUMBER_t:
+            return "JSON_TOKEN_NUMBER_t";
+        case JSON_TOKEN_COMMA_t:
+            return "JSON_TOKEN_COMMA_t";
+        case JSON_TOKEN_COLON_t:
+            return "JSON_TOKEN_COLON_t";
+        case JSON_TOKEN_TRUE_t:
+            return "JSON_TOKEN_TRUE_t";
+        case JSON_TOKEN_FALSE_t:
+            return "JSON_TOKEN_FALSE_t";
+        case JSON_TOKEN_NULL_t:
+            return "JSON_TOKEN_NULL_t";
+        case JSON_TOKEN_BRACE_OPEN_t:
+            return "JSON_TOKEN_BRACE_OPEN_t";
+        case JSON_TOKEN_BRACE_CLOSE_t:
+            return "JSON_TOKEN_BRACE_CLOSE_t";
+        case JSON_TOKEN_BRACKET_CLOSE_t:
+            return "JSON_TOKEN_BRACKET_CLOSE_t";
+        case JSON_TOKEN_BRACKET_OPEN_t:
+            return "JSON_TOKEN_BRACKET_OPEN_t";
+        default:
+            fprintf(stderr, "Unreachable\n");
+            exit(EXIT_FAILURE);
+        }
+
 }
 
-JsonTokenEntry *json_tokenize(char *json, size_t size) {
-    JsonTokenEntry *head = NULL;
-    JsonTokenEntry *tail = NULL;
-    
+JsonTokenArray *json_tokenize(char *json, size_t size) {
+    JsonTokenArray *array = malloc(sizeof(DynamicArray));
+    array->capacity = 4;
+    array->size = 0;
+    array->value = malloc(sizeof(JsonValue*) * array->capacity);
     for (size_t i = 0; i < size; i++) {
         if (json[i] == ' ' || json[i] == '\n') {
             continue;
@@ -121,37 +129,37 @@ JsonTokenEntry *json_tokenize(char *json, size_t size) {
         if (json[i] == ':') {
             JsonTokenEntry *token = create_token(JSON_TOKEN_COLON_t);
             token->value.char_value = json[i];
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] == ',') {
             JsonTokenEntry *token = create_token(JSON_TOKEN_COMMA_t);
             token->value.char_value = json[i];
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] == '{') {
             JsonTokenEntry *token = create_token(JSON_TOKEN_BRACE_OPEN_t);
             token->value.char_value = json[i];
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] == '}') {
             JsonTokenEntry *token = create_token(JSON_TOKEN_BRACE_CLOSE_t);
             token->value.char_value = json[i];
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] == '[') {
             JsonTokenEntry *token = create_token(JSON_TOKEN_BRACKET_OPEN_t);
             token->value.char_value = json[i];
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] == ']') {
             JsonTokenEntry *token = create_token(JSON_TOKEN_BRACKET_CLOSE_t);
             token->value.char_value = json[i];
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] == '"') {
@@ -165,7 +173,7 @@ JsonTokenEntry *json_tokenize(char *json, size_t size) {
             buffer[j] = '\0';
             JsonTokenEntry *token = create_token(JSON_TOKEN_STRING_t);
             token->value.string_value = strdup(buffer);
-            append_token(&head, &tail, token);
+            append_token(array, token);
             continue;
         }
         if (json[i] >= 48 && json[i] <= 57) {
@@ -177,7 +185,7 @@ JsonTokenEntry *json_tokenize(char *json, size_t size) {
             buffer[j] = '\0';
             JsonTokenEntry *token = create_token(JSON_TOKEN_NUMBER_t);
             token->value.string_value = strdup(buffer);
-            append_token(&head, &tail, token);
+            append_token(array, token);
             i--;
             continue;
         }
@@ -194,7 +202,7 @@ JsonTokenEntry *json_tokenize(char *json, size_t size) {
             }
             JsonTokenEntry *token = create_token(JSON_TOKEN_NULL_t);
             token->value.string_value = strdup(buffer);
-            append_token(&head, &tail, token);
+            append_token(array, token);
             i--;
             continue;
         }
@@ -211,7 +219,7 @@ JsonTokenEntry *json_tokenize(char *json, size_t size) {
             }
             JsonTokenEntry *token = create_token(JSON_TOKEN_TRUE_t);
             token->value.string_value = strdup(buffer);
-            append_token(&head, &tail, token);
+            append_token(array, token);
             i--;
             continue;
         }
@@ -228,30 +236,14 @@ JsonTokenEntry *json_tokenize(char *json, size_t size) {
             }
             JsonTokenEntry *token = create_token(JSON_TOKEN_FALSE_t);
             token->value.string_value = strdup(buffer);
-            append_token(&head, &tail, token);
+            append_token(array, token);
             i--;
             continue;
         }
         fprintf(stderr, "Error: could not parse char '%c'\n", json[i]);
         exit(EXIT_FAILURE);
     }
-    return head;   
-}
-
-void next_token_in_object(JsonTokenEntry **token_entry) {
-    if (!(*token_entry)->next) {
-        fprintf(stderr, "Missing closing brace\n");
-        exit(EXIT_FAILURE);
-    }
-    *token_entry = (*token_entry)->next;
-}
-
-void next_token_in_array(JsonTokenEntry **token_entry) {
-    if (!(*token_entry)->next) {
-        fprintf(stderr, "Missing closing bracket\n");
-        exit(EXIT_FAILURE);
-    }
-    *token_entry = (*token_entry)->next;
+    return array;   
 }
 
 JsonValue *parse_value();
@@ -261,7 +253,7 @@ size_t djb2_hash(const char *str) {
     unsigned char c;
 
     while ((c = (unsigned char)*str++)) {
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c*/
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
     }
 
     return hash;
@@ -319,7 +311,7 @@ bool add_entry(HashTable *table, const char *key, JsonValue *value) {
     table->buckets[bucket_idx] = new_entry;
     table->size++;
 
-    float load_factor = (float)table->size / table->capacity;
+    float load_factor = (float)table->size / (float)table->capacity;
 
     if (load_factor > 0.75) {
         resize_table(table);
@@ -333,8 +325,6 @@ JsonValue *get_entry(HashTable *table, const char *key) {
 
     HashEntry *entry = table->buckets[bucket_idx];
     while (entry) {
-        printf("key: %s\n", key);
-        printf("entry key: %s\n", entry->key);
         if (strcmp(entry->key, key) == 0) {
             return entry->value;
         }
@@ -343,30 +333,43 @@ JsonValue *get_entry(HashTable *table, const char *key) {
     return NULL;
 }
 
-JsonValue *parse_object(JsonTokenEntry **token_entry) {
+void next_token_in_object(JsonTokenArray *array, size_t *current_index) {
+    if (++(*current_index) >= array->size) {
+        fprintf(stderr, "Missing closing brace index: %zu, size: %zu\n", *current_index, array->size);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void next_token_in_array(JsonTokenArray *array, size_t *current_index) {
+    if (++(*current_index) >= array->size) {
+        fprintf(stderr, "Missing closing bracket\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+JsonValue *parse_object(JsonTokenArray *token_array, size_t *token_index) {
     HashTable *table = create_table(2);
-
-    next_token_in_object(token_entry);
-    while ((*token_entry)->type != JSON_TOKEN_BRACE_CLOSE_t) {
-        if ((*token_entry)->type != JSON_TOKEN_STRING_t) {
-            fprintf(stderr, "Expected string key in object: %s\n", json_token_type_to_string((*token_entry)->type));
+    next_token_in_object(token_array, token_index);
+    while (token_array->value[*token_index]->type != JSON_TOKEN_BRACE_CLOSE_t) {
+        if (token_array->value[*token_index]->type != JSON_TOKEN_STRING_t) {
+            fprintf(stderr, "Expected string key in object: %s\n", json_token_type_to_string(token_array->value[*token_index]->type));
             exit(EXIT_FAILURE);
         }
-        char *key = (*token_entry)->value.string_value;
-        next_token_in_object(token_entry);
-        if ((*token_entry)->type != JSON_TOKEN_COLON_t) {
-            fprintf(stderr, "Expected ':' in key-value pair got %s\n", json_token_type_to_string((*token_entry)->type));
+        char *key = strdup(token_array->value[*token_index]->value.string_value);
+        next_token_in_object(token_array, token_index);
+        if (token_array->value[*token_index]->type != JSON_TOKEN_COLON_t) {
+            fprintf(stderr, "Expected ':' in key-value pair got %s\n", json_token_type_to_string(token_array->value[*token_index]->type));
             exit(EXIT_FAILURE);
         }
-        next_token_in_object(token_entry);
+        next_token_in_object(token_array, token_index);
 
-        JsonValue *value = parse_value(token_entry); 
+        JsonValue *value = parse_value(token_array, token_index); 
         add_entry(table, key, value);
         
-        next_token_in_object(token_entry);
+        next_token_in_object(token_array, token_index);
 
-        if ((*token_entry)->type == JSON_TOKEN_COMMA_t) {
-            next_token_in_object(token_entry);
+        if (token_array->value[*token_index]->type == JSON_TOKEN_COMMA_t) {
+            next_token_in_object(token_array, token_index);
         }
     }
     JsonValue *json_value = malloc(sizeof(JsonValue));
@@ -375,60 +378,56 @@ JsonValue *parse_object(JsonTokenEntry **token_entry) {
     return json_value;
 }
 
-JsonValue *parse_array(JsonTokenEntry **token_entry) {
-    JsonArray *node_head = NULL;
-    JsonArray *node_tail = NULL;
-    next_token_in_array(token_entry);
-    while ((*token_entry)->type != JSON_TOKEN_BRACKET_CLOSE_t) {
-        JsonValue *value = parse_value(token_entry);
-        if (node_head == NULL) {
-            node_head = malloc(sizeof(JsonArray));
-            node_head->value = value;
-            node_tail = node_head;
-        } else {
-            JsonArray *new_node = malloc(sizeof(JsonArray));
-            new_node->value = value;
-            node_tail->next = new_node;
-            node_tail = new_node;
+JsonValue *parse_array(JsonTokenArray *token_array, size_t *token_index) {
+    DynamicArray *array = malloc(sizeof(DynamicArray));
+    array->capacity = 4;
+    array->size = 0;
+    array->value = malloc(sizeof(JsonValue*) * array->capacity);
+    next_token_in_array(token_array, token_index);
+    while (token_array->value[*token_index]->type != JSON_TOKEN_BRACKET_CLOSE_t) {
+        JsonValue *value = parse_value(token_array, token_index);
+        if (array->size >= array->capacity) {
+            array->capacity *= 2;
+            array->value = realloc(array->value, sizeof(JsonValue*) * array->capacity);
         }
-        next_token_in_array(token_entry);
+        array->value[array->size] = value;
+        array->size++;
 
-        if ((*token_entry)->type == JSON_TOKEN_COMMA_t) {
-            next_token_in_array(token_entry);
+        next_token_in_array(token_array, token_index);
+
+        if (token_array->value[*token_index]->type == JSON_TOKEN_COMMA_t) {
+            next_token_in_array(token_array, token_index);
         } 
     }
     JsonValue *node = malloc(sizeof(JsonValue));
     node->type = JSON_ARRAY_t;
-    node->value.array = node_head;
+    node->value.array = array;
     return node;
 }
 
-JsonValue *parse_value(JsonTokenEntry **token_entry) {
-    if (*token_entry == NULL) {
-        fprintf(stderr, "Unable to pass NULL value\n");
-        exit(EXIT_FAILURE);
-    }
+JsonValue *parse_value(JsonTokenArray *token_array, size_t *token_index) {
     JsonValue *json_value = malloc(sizeof(JsonValue));
-    switch ((*token_entry)->type) {
+    JsonTokenEntry *token = token_array->value[*token_index];
+    switch (token->type) {
         case JSON_TOKEN_STRING_t: {
             json_value->type = JSON_STRING_t;
-            json_value->value.string = (*token_entry)->value.string_value;
+            json_value->value.string = strdup(token->value.string_value);
             return json_value;
         }
         case JSON_TOKEN_NUMBER_t:
             json_value->type = JSON_NUMBER_t;
             char *end;
-            json_value->value.number = strtod((*token_entry)->value.string_value, &end);
-            if (strcmp(end, (*token_entry)->value.string_value) == 0) {
-                fprintf(stderr, "Could not parse string to double: %s\n", (*token_entry)->value.string_value);
+            json_value->value.number = strtod(strdup(token->value.string_value), &end);
+            if (strcmp(end, token->value.string_value) == 0) {
+                fprintf(stderr, "Could not parse string to double: %s\n", token->value.string_value);
                 exit(EXIT_FAILURE);
             }
             return json_value;
         case JSON_TOKEN_TRUE_t: {
             json_value->type = JSON_BOOL_t;
             json_value->value.boolean = true;
-            if (strcmp("true", (*token_entry)->value.string_value) != 0) {
-                fprintf(stderr, "Could not parse string to boolean, expected 'true' got %s\n", (*token_entry)->value.string_value);
+            if (strcmp("true", token->value.string_value) != 0) {
+                fprintf(stderr, "Could not parse string to boolean, expected 'true' got %s\n", token->value.string_value);
                 exit(EXIT_FAILURE);
             }
             return json_value;
@@ -436,26 +435,89 @@ JsonValue *parse_value(JsonTokenEntry **token_entry) {
         case JSON_TOKEN_FALSE_t: {
             json_value->type = JSON_BOOL_t;
             json_value->value.boolean = false;
-            if (strcmp("false", (*token_entry)->value.string_value) != 0) {
-                fprintf(stderr, "Could not parse string to boolean, expected 'false' got %s\n", (*token_entry)->value.string_value);
+            if (strcmp("false", token->value.string_value) != 0) {
+                fprintf(stderr, "Could not parse string to boolean, expected 'false' got %s\n", token->value.string_value);
                 exit(EXIT_FAILURE);
             }
             return json_value;
         }
         case JSON_TOKEN_BRACE_OPEN_t:
             free(json_value);
-            return parse_object(token_entry);
+            return parse_object(token_array, token_index);
         case JSON_TOKEN_BRACKET_OPEN_t:
             free(json_value);
-            return parse_array(token_entry);
+            return parse_array(token_array, token_index);
         case JSON_TOKEN_NULL_t:
             json_value->type = JSON_NULL_t;
             return json_value;
         default:
-            fprintf(stderr, "Unexpected token type %s\n", json_token_type_to_string((*token_entry)->type));
+            fprintf(stderr, "Unexpected token type '%s' at index %zu\n", json_token_type_to_string(token->type), *token_index);
             exit(EXIT_FAILURE);
     }
-} 
+}
+
+void free_json_value();
+
+void free_json_object(JsonValue *json_value) {
+    HashTable *object = json_value->value.object;
+    for (size_t i = 0; i < object->capacity; i++) {
+        HashEntry *entry = json_value->value.object->buckets[i];
+        while (entry) {
+            HashEntry *next = entry->next; 
+            free_json_value((JsonValue*)entry->value);
+            free(entry->key);
+            free(entry);
+            entry = next;
+        }
+    }
+    free(object);
+}
+
+void free_json_array(JsonValue *json_value) {
+    DynamicArray *array = json_value->value.array;
+    JsonValue **inner_array = (JsonValue**)array->value;
+    for (size_t i = 0; i < array->size; i++) {
+        free_json_value(inner_array[i]);
+    }
+    free(inner_array);
+    free(array);
+}
+
+void free_json_value(JsonValue *json_value) {
+    switch (json_value->type) {
+        case JSON_NULL_t:
+            free(json_value);
+            break;
+        case JSON_BOOL_t:
+            free(json_value);
+            break;
+        case JSON_NUMBER_t:
+            free(json_value);
+            break;
+        case JSON_STRING_t:
+            free(json_value->value.string);
+            free(json_value);
+            break;
+        case JSON_OBJECT_t: 
+            free_json_object(json_value);
+            break;
+        case JSON_ARRAY_t: 
+            free_json_array(json_value);
+            break;
+    }
+}
+
+void free_json_token_array(JsonTokenArray *token_array) {
+    for (size_t i = 0; i < token_array->size; i++) {
+        JsonTokenEntry *entry = token_array->value[i];
+        if (entry->type == JSON_TOKEN_STRING_t) {
+            free(entry->value.string_value);
+        }
+        free(entry);
+    }
+    free(token_array->value);
+    free(token_array);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -489,25 +551,31 @@ int main(int argc, char *argv[]) {
 
     fclose(file);
 
-    JsonTokenEntry *token_entry = json_tokenize(buffer, top);
-    // printf("value: %s\n", json_token_type_to_string(token_entry_head->type));
-    // printf("next value: %s\n", json_token_type_to_string(token_entry_head->next->type));
-    // printf("next value: %s\n", json_token_type_to_string(token_entry_head->next->next->type));
-    // printf("next value: %s\n", json_token_type_to_string(token_entry_head->next->next->next->type));
-    // printf("next far value: %s\n", json_token_type_to_string(token_entry_head->next->next->next->next->next->next->next->next->next->next->next->next->next->next->next->next->next->next->next->type));
+    JsonTokenArray *token_array = json_tokenize(buffer, top);
+    // printf("size: %zu\n", token_array->size);
+    // printf("capacity: %zu\n", token_array->capacity);
+    // printf("value: %s\n", json_token_type_to_string(token_array->value[0]->type));
+    // printf("next value: %s\n", json_token_type_to_string(token_array->value[1]->type));
+    // printf("next value: %s\n", json_token_type_to_string(token_array->value[2]->type));
+    // printf("next value: %s\n", json_token_type_to_string(token_array->value[3]->type));
+    // printf("next far value: %s\n", json_token_type_to_string(token_array->value[4]->type));
     // printf("_________________________________________\n");
 
-    JsonValue *parsed_json = parse_value(&token_entry);
+    size_t token_index = 0;
+    JsonValue *parsed_json = parse_value(token_array, &token_index);
+    free_json_token_array(token_array);
     // HashTable *table = parsed_json->value.object;
     // if (!get_entry(table, "a_boolean")) {
     //     printf("a_boolean not found\n");
     // }
-    // printf("a_string: '%f'\n", get_entry(table, "a_number")->value.number);
-    // printf("a_number: '%s'\n", get_entry(table, "a_string")->value.string);
+    // printf("a_string: '%s'\n", get_entry(table, "a_string")->value.string);
+    // printf("a_number: '%f'\n", get_entry(table, "a_number")->value.number);
     // printf("a_boolean: '%d'\n", get_entry(table, "a_boolean")->value.boolean);
     // printf("another_boolean: '%d'\n", get_entry(table, "another_boolean")->value.boolean);
+    // DynamicArray *array = get_entry(table, "an_array")->value.array;
+    // printf("scoped_string: '%s'\n", get_entry(((JsonValue*)array->value[0])->value.object, "scoped_string")->value.string);
+    // printf("scoped_number: '%f'\n", get_entry(((JsonValue*)array->value[1])->value.object, "scoped_number")->value.number);
 
-    free(token_entry);
-    free(parsed_json);
+    free_json_value(parsed_json);
     free(buffer);
 }
