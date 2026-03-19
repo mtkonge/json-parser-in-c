@@ -81,7 +81,7 @@ void append_token(JsonTokenArray *array, JsonTokenEntry *new_token) {
 
 
 JsonTokenEntry *create_token(JsonTokenType type) {
-    JsonTokenEntry *token = malloc(sizeof(JsonTokenType));
+    JsonTokenEntry *token = malloc(sizeof(JsonTokenEntry));
     token->type = type;
     return token;
 }
@@ -123,7 +123,7 @@ JsonTokenArray *json_tokenize(char *json, size_t size) {
     array->size = 0;
     array->value = malloc(sizeof(JsonValue*) * array->capacity);
     for (size_t i = 0; i < size; i++) {
-        if (json[i] == ' ' || json[i] == '\n') {
+        if (json[i] == ' ' || json[i] == '\n' || json[i] == '\t') {
             continue;
         }
         if (json[i] == ':') {
@@ -355,7 +355,7 @@ JsonValue *parse_object(JsonTokenArray *token_array, size_t *token_index) {
             fprintf(stderr, "Expected string key in object: %s\n", json_token_type_to_string(token_array->value[*token_index]->type));
             exit(EXIT_FAILURE);
         }
-        char *key = strdup(token_array->value[*token_index]->value.string_value);
+        char *key = token_array->value[*token_index]->value.string_value;
         next_token_in_object(token_array, token_index);
         if (token_array->value[*token_index]->type != JSON_TOKEN_COLON_t) {
             fprintf(stderr, "Expected ':' in key-value pair got %s\n", json_token_type_to_string(token_array->value[*token_index]->type));
@@ -461,7 +461,7 @@ void free_json_value();
 void free_json_object(JsonValue *json_value) {
     HashTable *object = json_value->value.object;
     for (size_t i = 0; i < object->capacity; i++) {
-        HashEntry *entry = json_value->value.object->buckets[i];
+        HashEntry *entry = object->buckets[i];
         while (entry) {
             HashEntry *next = entry->next; 
             free_json_value((JsonValue*)entry->value);
@@ -470,7 +470,9 @@ void free_json_object(JsonValue *json_value) {
             entry = next;
         }
     }
+    free(object->buckets);
     free(object);
+    free(json_value);
 }
 
 void free_json_array(JsonValue *json_value) {
