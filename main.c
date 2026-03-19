@@ -246,7 +246,7 @@ JsonTokenArray *json_tokenize(char *json, size_t size) {
     return array;   
 }
 
-JsonValue *parse_value();
+JsonValue *parse_value(JsonTokenArray *token_array, size_t *token_index);
 
 size_t djb2_hash(const char *str) {
     size_t hash = 5381;
@@ -456,7 +456,7 @@ JsonValue *parse_value(JsonTokenArray *token_array, size_t *token_index) {
     }
 }
 
-void free_json_value();
+void free_json_value(JsonValue *json_value);
 
 void free_json_object(JsonValue *json_value) {
     HashTable *object = json_value->value.object;
